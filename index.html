@@ -414,7 +414,7 @@ footer{
         <div class="mock-score-label">ATS Score</div>
       </div>
       <div class="mock-name">Your Name</div>
-      <div class="mock-meta">your@email.com · +91 XXXXX XXXXX · City · linkedin.com/in/yourprofile</div>
+      <div class="mock-meta"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="661f09131426030b070f0a4805090b">[email&#160;protected]</a> · +91 XXXXX XXXXX · City · linkedin.com/in/yourprofile</div>
       <div class="mock-section">Summary</div>
       <div class="mock-line full"></div>
       <div class="mock-line med" style="margin-bottom:14px"></div>
@@ -754,7 +754,7 @@ footer{
   </div>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ═══════════════════════════════════════════
 // CONFIG — replace with your proxy URL after setup
 // ═══════════════════════════════════════════
@@ -1012,7 +1012,9 @@ CRITICAL NAUKRI ATS RULES:
 7. Contact: plain text header — no boxes/tables
 8. Max 1-2 pages
 9. NEVER start summary with "I am a [degree]..." — start with value proposition
-Output: complete resume as clean plain text, ALL CAPS section headings, dashes for bullets.`;
+10. NEVER include a "References" section or "REFERENCES AVAILABLE UPON REQUEST" line
+11. NEVER include any "Resume Optimization Notes", "ATS Notes", "Next Steps", or meta-commentary — output ONLY the resume itself
+Output: complete resume as clean plain text, ALL CAPS section headings, dashes for bullets. Stop after the last resume section. No extra notes.`;
 
   try{
     const result=await callClaude(SYS,`Name:${name}\nRole:${role}\nIndustry:${industry}\nExp:${exp}\nCompanies:${companies||'Not specified'}\nLocation:${location||'India'}\nSkills:${skills}\nExperience/Projects:${experience||'Create plausible bullets for this role'}\nEducation:${education||'Add placeholder'}\n\nBuild a complete ATS-safe Indian resume.`);
@@ -1117,7 +1119,9 @@ CRITICAL RULES:
 6. Skills: minimum 10, separate Technical vs Soft Skills
 7. Education: include CGPA if ≥7.0 (recruiters use 6.5/7.0 filter)
 8. Section order: Summary → Skills → Projects → Internships → Education → Certifications → Achievements
-Output: complete resume as clean plain text, ALL CAPS headings, dash bullets.`;
+9. NEVER include a "References" section or "REFERENCES AVAILABLE UPON REQUEST" line
+10. NEVER include "Resume Optimization Notes", "ATS Notes", "Next Steps", or any meta-commentary — output ONLY the resume
+Output: complete resume as clean plain text, ALL CAPS headings, dash bullets. Stop after the last resume section.`;
 
   try{
     const result=await callClaude(SYS,`Name:${name}\nRole:${role}\nCompanies:${companies||'Top MNCs, GCCs, startups'}\nCollege:${college||'Not provided'}\nSkills:${skills}\nProjects:${projects||'Create 2 realistic projects for these skills'}\nCerts:${certs||'None'}\nInternship:${intern||'None'}\n\nBuild a strong fresher resume.`);
@@ -1167,58 +1171,214 @@ function copyEl(id){
 }
 function dlText(id,fn){
   const el=document.getElementById(id);if(!el)return;
+  const clean=sanitiseResumeText(el.innerText||el.textContent||'');
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([el.innerText],{type:'text/plain'}));
+  a.href=URL.createObjectURL(new Blob([clean],{type:'text/plain'}));
   a.download=fn;a.click();
+}
+
+function sanitiseResumeText(raw){
+  // Strip any "References" block, "Resume Optimization Notes" block, and trailing "---" separators
+  // Split into lines, find the start of forbidden sections, discard from there
+  const forbidden=[
+    /^references available upon request/i,
+    /^-{3,}\s*$/,
+    /^#+\s*resume optimization notes/i,
+    /^resume optimization notes/i,
+    /^#+\s*ats compliance/i,
+    /^next steps[:\s]/i,
+    /^#+\s*key improvements/i,
+    /^#+\s*linkedin.*optimization/i,
+  ];
+  const lines=raw.split('\n');
+  let cutAt=lines.length;
+  for(let i=0;i<lines.length;i++){
+    const l=lines[i].trim();
+    if(forbidden.some(re=>re.test(l))){cutAt=i;break;}
+  }
+  // Also strip standalone REFERENCES heading
+  let result=[];
+  let skipSection=false;
+  for(let i=0;i<cutAt;i++){
+    const l=lines[i].trim();
+    if(/^REFERENCES\s*$/.test(l)||/^REFERENCES AVAILABLE/i.test(l)){skipSection=true;continue;}
+    // A new ALL-CAPS section heading ends the skip
+    if(skipSection&&l===l.toUpperCase()&&l.length>3&&l.length<60&&!/^[-•]/.test(l)&&l!==''){skipSection=false;}
+    if(!skipSection)result.push(lines[i]);
+  }
+  // Trim trailing blank lines and dashes
+  while(result.length&&/^\s*(-{3,})?\s*$/.test(result[result.length-1]))result.pop();
+  return result.join('\n');
 }
 
 function dlPDF(id,fname){
   const el=document.getElementById(id);
   if(!el){return;}
-  const text=el.innerText||el.textContent||'';
-  if(!text.trim()){return;}
+  const rawText=el.innerText||el.textContent||'';
+  if(!rawText.trim()){return;}
+  const text=sanitiseResumeText(rawText);
   try{
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
-    const margin=18;
     const pageW=210;
-    const usableW=pageW-margin*2;
-    const lineH=5.2;
-    let y=margin;
-    const lines=text.split('\n');
-    lines.forEach(rawLine=>{
-      const line=rawLine.trimEnd();
-      // Detect section headings (all caps, short lines)
-      const isHeading=line===line.toUpperCase()&&line.trim().length>2&&line.trim().length<60&&!/^[\-•▸·]/.test(line.trim());
-      const isBullet=/^[\s]*[\-•▸·]/.test(line);
-      const isEmpty=line.trim()==='';
-      if(isEmpty){y+=lineH*0.5;return;}
-      if(y>282){doc.addPage();y=margin;}
-      if(isHeading&&line.trim().length>0){
-        if(y>margin+2){y+=1;}
-        doc.setFont('helvetica','bold');
-        doc.setFontSize(10);
-        doc.setTextColor(26,58,92);
-        doc.text(line.trim(),margin,y);
-        y+=1;
-        doc.setDrawColor(26,58,92);
-        doc.setLineWidth(0.4);
-        doc.line(margin,y,pageW-margin,y);
-        y+=lineH*0.8;
-        doc.setTextColor(30,30,30);
+    const pageH=297;
+    const marginL=16;
+    const marginR=16;
+    const usableW=pageW-marginL-marginR;
+    const lineH=5.0;
+    let y=0;
+
+    // ── Parse the resume text into structured sections ──
+    const rawLines=text.split('\n');
+
+    // Extract header block (name, role/subtitle, contact lines at top)
+    let nameText='';
+    let subtitleText='';
+    let contactLines=[];
+    let bodyStartIdx=0;
+
+    for(let i=0;i<rawLines.length;i++){
+      const l=rawLines[i].trim();
+      if(!l){if(nameText){bodyStartIdx=i+1;break;}continue;}
+      if(!nameText){nameText=l;continue;}
+      // Check if this looks like a contact line (has @, |, +, linkedin, phone pattern)
+      if(/[@|+]|\blinkedin\b|\bportfolio\b|\d{5}/i.test(l)||/^\+?[\d\s\-()]{8,}$/.test(l)){
+        contactLines.push(l);
+        bodyStartIdx=i+1;
+      } else if(!subtitleText&&!/^[A-Z\s]{4,}$/.test(l)){
+        subtitleText=l;
+        bodyStartIdx=i+1;
       } else {
-        doc.setFont('helvetica', isBullet?'normal':'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(40,40,40);
-        const indent=isBullet?margin+3:margin;
-        const wrapped=doc.splitTextToSize(line.trim(),usableW-(isBullet?3:0));
-        wrapped.forEach((wl,i)=>{
-          if(y>282){doc.addPage();y=margin;}
+        bodyStartIdx=i;
+        break;
+      }
+    }
+
+    // ── HEADER BAND ──
+    const headerH=nameText?(subtitleText||contactLines.length?38:26):0;
+    if(headerH>0){
+      // Dark navy background
+      doc.setFillColor(15,35,66);
+      doc.rect(0,0,pageW,headerH,'F');
+      // Thin accent line at bottom of header
+      doc.setFillColor(91,141,254);
+      doc.rect(0,headerH-1,pageW,1,'F');
+      y=10;
+      // Name
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(20);
+      doc.setTextColor(255,255,255);
+      doc.text(nameText.toUpperCase(),pageW/2,y,{align:'center'});
+      y+=7;
+      if(subtitleText){
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(10);
+        doc.setTextColor(160,185,230);
+        doc.text(subtitleText,pageW/2,y,{align:'center'});
+        y+=5.5;
+      }
+      if(contactLines.length){
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(8);
+        doc.setTextColor(180,200,235);
+        const contactStr=contactLines.join('  |  ');
+        const wrapped=doc.splitTextToSize(contactStr,usableW-10);
+        wrapped.forEach(wl=>{doc.text(wl,pageW/2,y,{align:'center'});y+=4.2;});
+      }
+      y=headerH+8;
+    } else {
+      y=16;
+    }
+
+    // ── BODY ──
+    const accentR=15,accentG=58,accentB=115;
+
+    for(let i=bodyStartIdx;i<rawLines.length;i++){
+      const raw=rawLines[i];
+      const line=raw.trimEnd();
+      const trimmed=line.trim();
+
+      // Empty line
+      if(!trimmed){y+=lineH*0.45;continue;}
+
+      // Page overflow guard
+      if(y>pageH-14){doc.addPage();y=14;
+        // Repeat thin accent top bar on new pages
+        doc.setFillColor(accentR,accentG,accentB);
+        doc.rect(0,0,pageW,2,'F');
+      }
+
+      // Detect section heading: ALL CAPS, ≥3 chars, not a bullet, not a separator
+      const isHeading=trimmed===trimmed.toUpperCase()&&trimmed.length>=3&&trimmed.length<=55&&!/^[-•▸·*]+/.test(trimmed)&&!/^\d/.test(trimmed)&&!/^[|+@]/.test(trimmed);
+
+      // Detect job title line (mixed case, not a bullet, follows pattern "Title | Company | Date")
+      const isBullet=/^[-•▸·*]/.test(trimmed);
+
+      // Detect separator
+      const isSep=/^[-=]{3,}$/.test(trimmed);
+      if(isSep){continue;} // skip separators
+
+      if(isHeading){
+        y+=2;
+        // Section heading style
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(accentR,accentG,accentB);
+        doc.text(trimmed,marginL,y);
+        y+=1.5;
+        doc.setDrawColor(accentR,accentG,accentB);
+        doc.setLineWidth(0.5);
+        doc.line(marginL,y,pageW-marginR,y);
+        y+=lineH*0.7;
+        doc.setTextColor(30,30,30);
+
+      } else if(isBullet){
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(8.8);
+        doc.setTextColor(45,45,45);
+        const bulletChar='•';
+        const indent=marginL+4;
+        const text2=trimmed.replace(/^[-•▸·*]+\s*/,'');
+        const wrapped=doc.splitTextToSize(text2,usableW-6);
+        doc.text(bulletChar,marginL+0.5,y);
+        wrapped.forEach((wl,wi)=>{
+          if(y>pageH-14){doc.addPage();y=14;}
           doc.text(wl,indent,y);
           y+=lineH;
         });
+
+      } else {
+        // Normal line — could be job title, company, date, education, etc.
+        // Check if it looks like a role+company+date line (bold it)
+        const isRoleOrTitle=/^[A-Z][a-zA-Z\s&,.()+'-]+\s*[|–-]/.test(trimmed)||/\b(20\d\d|Present|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(trimmed);
+        if(isRoleOrTitle){
+          doc.setFont('helvetica','bold');
+          doc.setFontSize(9);
+          doc.setTextColor(20,20,20);
+        } else {
+          doc.setFont('helvetica','normal');
+          doc.setFontSize(8.8);
+          doc.setTextColor(55,55,55);
+        }
+        const wrapped=doc.splitTextToSize(trimmed,usableW);
+        wrapped.forEach(wl=>{
+          if(y>pageH-14){doc.addPage();y=14;}
+          doc.text(wl,marginL,y);
+          y+=lineH;
+        });
       }
-    });
+    }
+
+    // ── FOOTER ──
+    const totalPages=doc.getNumberOfPages();
+    for(let p=1;p<=totalPages;p++){
+      doc.setPage(p);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7);
+      doc.setTextColor(180,180,180);
+      doc.text('Generated by ResumeWave — resumewave.gcklab.com',pageW/2,pageH-5,{align:'center'});
+    }
+
     doc.save((fname||'resume')+'.pdf');
   }catch(e){
     alert('PDF generation failed: '+e.message+'. Please use .txt download instead.');
@@ -1341,8 +1501,8 @@ function signOut() {
 // ═══════════════════════════════════════════════════════
 
 const PLANS = {
-  free:   { label:'Free',        ats:1,  builder:1,  linkedin:1,  fresher:3,  tailor:0,  coverletter:0,  gapfixer:0,  naukri:0,  interview:0,  upwork:0,  pdf:0  },
-  pro:    { label:'Pro',         ats:30, builder:10, linkedin:30, fresher:10, tailor:5,  coverletter:10, gapfixer:5,  naukri:10, interview:0,  upwork:0,  pdf:10 },
+  free:   { label:'Free',        ats:1,  builder:1,  linkedin:1,  fresher:3,  tailor:0,  coverletter:0,  gapfixer:0,  naukri:0,  interview:0,  upwork:0,  pdf:999},
+  pro:    { label:'Pro',         ats:30, builder:10, linkedin:30, fresher:10, tailor:5,  coverletter:10, gapfixer:5,  naukri:10, interview:0,  upwork:0,  pdf:999},
   career: { label:'Career Pack', ats:999,builder:999,linkedin:999,fresher:999,tailor:999,coverletter:999,gapfixer:999,naukri:999,interview:999,upwork:999,pdf:999}
 };
 
@@ -2066,11 +2226,11 @@ function esc2(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
     <p style="font-size:15px;color:var(--muted);line-height:1.7;margin-bottom:40px;font-weight:300">Have a question about a tool, feedback, or need help with your resume output? We read every message and respond personally.</p>
 
     <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:40px">
-      <a href="mailto:gurucharan.k@zohomail.in" style="text-decoration:none;display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--rim);border-radius:14px;padding:22px 24px;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(91,141,254,0.3)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.06)'">
+      <a href="/cdn-cgi/l/email-protection#e384969196808b8291828dcd88a3998c8b8c8e828a8fcd8a8d" style="text-decoration:none;display:flex;align-items:center;gap:16px;background:var(--card);border:1px solid var(--rim);border-radius:14px;padding:22px 24px;transition:border-color 0.2s" onmouseover="this.style.borderColor='rgba(91,141,254,0.3)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.06)'">
         <div style="width:44px;height:44px;border-radius:10px;background:rgba(91,141,254,0.1);border:1px solid rgba(91,141,254,0.2);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">✉️</div>
         <div>
           <div style="font-family:var(--hd);font-size:14px;font-weight:600;color:var(--txt);margin-bottom:3px">Email us</div>
-          <div style="font-size:13px;color:var(--sky)">gurucharan.k@zohomail.in</div>
+          <div style="font-size:13px;color:var(--sky)"><span class="__cf_email__" data-cfemail="3e594b4c4b5d565f4c5f5010557e44515651535f5752105750">[email&#160;protected]</span></div>
           <div style="font-size:12px;color:var(--muted);margin-top:2px">We respond within 24–48 hours</div>
         </div>
       </a>
@@ -2122,7 +2282,7 @@ function esc2(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
       </div>
       <div>
         <h2 style="font-family:var(--hd);font-size:17px;font-weight:600;margin-bottom:10px;color:var(--txt)">6. Contact</h2>
-        <p style="font-size:14px;color:var(--muted);line-height:1.75">For any privacy-related questions, email us at <a href="mailto:gurucharan.k@zohomail.in" style="color:var(--sky)">gurucharan.k@zohomail.in</a>.</p>
+        <p style="font-size:14px;color:var(--muted);line-height:1.75">For any privacy-related questions, email us at <a href="/cdn-cgi/l/email-protection#107765626573787162717e3e7b506a7f787f7d71797c3e797e" style="color:var(--sky)"><span class="__cf_email__" data-cfemail="a0c7d5d2d5c3c8c1d2c1ce8ecbe0dacfc8cfcdc1c9cc8ec9ce">[email&#160;protected]</span></a>.</p>
       </div>
     </div>
   </div>
@@ -2162,7 +2322,7 @@ function esc2(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
       </div>
       <div>
         <h2 style="font-family:var(--hd);font-size:17px;font-weight:600;margin-bottom:10px;color:var(--txt)">7. Contact</h2>
-        <p style="font-size:14px;color:var(--muted);line-height:1.75">Questions about these terms? Email <a href="mailto:gurucharan.k@zohomail.in" style="color:var(--sky)">gurucharan.k@zohomail.in</a></p>
+        <p style="font-size:14px;color:var(--muted);line-height:1.75">Questions about these terms? Email <a href="/cdn-cgi/l/email-protection#2e495b5c5b4d464f5c4f4000456e54414641434f4742004740" style="color:var(--sky)"><span class="__cf_email__" data-cfemail="305745424553585142515e1e5b704a5f585f5d51595c1e595e">[email&#160;protected]</span></a></p>
       </div>
     </div>
   </div>
@@ -2360,16 +2520,4 @@ function esc2(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
       <div class="fg"><label class="lbl">Your Name</label><input type="text" id="uw-name" placeholder="Arjun Sharma"/></div>
       <div class="fg"><label class="lbl">Freelance Service / Skill</label><input type="text" id="uw-skill" placeholder="Financial Modelling, Excel Automation, Data Analysis..."/></div>
     </div>
-    <div class="fg"><label class="lbl">Target Clients</label><input type="text" id="uw-clients" placeholder="Startups, US SMBs, Finance teams, E-commerce..."/></div>
-    <div class="fg"><label class="lbl">Your Experience & Achievements</label><textarea id="uw-exp" rows="4" placeholder="3 years FP&A, built 50+ financial models, reduced reporting time by 40%, worked with US/UK clients..."></textarea></div>
-    <div class="mode-tabs">
-      <button class="dtab active" onclick="setUWMode('upwork',this)">Upwork Profile</button>
-      <button class="dtab" onclick="setUWMode('fiverr',this)">Fiverr Gig Description</button>
-    </div>
-    <button class="run-btn" onclick="runUpwork()" id="uw-btn">Write My Profile →</button>
-    <div id="uw-result"></div>
-  </div>
-</div>
-
-</body>
-</html>
+    <div class="fg"><label class="lbl">Target Clients</label><input type="text" id="uw-clients" placeholder="Startups, US SMBs, Fi
